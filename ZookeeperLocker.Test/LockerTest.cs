@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Reactive;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -94,7 +98,7 @@ namespace ZookeeperLocker.Test
                     { ConnectionsString = "192.168.1.246:2181", SessionTimeout = 30000 });
                 try
                 {
-                    zkLocker.Lock(new Random().Next(10000));
+                    zkLocker.Lock();
                     _testOutputHelper.WriteLine("1");
                     zkLocker.UnLock();
                 }
@@ -103,6 +107,29 @@ namespace ZookeeperLocker.Test
                     _testOutputHelper.WriteLine(ex.Message);
                 }
             });
+        }
+
+        [Fact]
+        public void TestLazySingle()
+        {
+            Lazy<int> a;
+            Parallel.For(0, 30, _ =>
+            {
+                a = new Lazy<int>(() => _, true);
+                _testOutputHelper.WriteLine(a.Value.ToString());
+            });
+        }
+
+        [Fact]
+        public void Test()
+        {
+            IObserver<string> observer = Observer.Create<string>(_ =>
+                {
+                    Console.WriteLine($"{_}111111");
+                }
+                );
+            observer.OnNext("asdf");
+            Thread.Sleep(1000);
         }
     }
 }

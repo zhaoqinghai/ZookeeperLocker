@@ -7,7 +7,7 @@ using org.apache.zookeeper;
 
 namespace ZookeeperLocker
 {
-    public class ZkLocker : Watcher
+    public class ZkLocker : Watcher, IZkLocker
     {
         private readonly ZooKeeper _client;
 
@@ -16,6 +16,8 @@ namespace ZookeeperLocker
         private readonly EventWaitHandle _event = new ManualResetEvent(false);
 
         private readonly string _lockName;
+
+        private readonly int _lockTimeout;
 
         /// <summary>
         /// 全局默认锁defaultLock
@@ -26,7 +28,7 @@ namespace ZookeeperLocker
 
         }
 
-        public ZkLocker(string lockName, ZkOption option)
+        public ZkLocker(string lockName, ZkOption option, int lockTimeout = 5000)
         {
             _client = option.SessionId == long.MinValue
                 ? new ZooKeeper(option.ConnectionsString, option.SessionTimeout, this, option.CanBeReadOnly)
@@ -41,12 +43,13 @@ namespace ZookeeperLocker
                 _client.createAsync("/locks/" + lockName, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT).Wait();
             }
             _lockName = lockName;
+            _lockTimeout = lockTimeout;
         }
+
         /// <summary>
         /// lock
         /// </summary>
-        /// <param name="timeout">超时时间默认30秒</param>
-        public void Lock(int timeout = 30000)
+        public void Lock()
         {
             _currentNode = _client.createAsync($"/locks/{_lockName}/node", new byte[0],
                 ZooDefs.Ids.OPEN_ACL_UNSAFE,
@@ -54,7 +57,7 @@ namespace ZookeeperLocker
 
             if (ExistPreNodeExecuted().Result)
             {
-                var result = WaitHandle.WaitAny(new WaitHandle[] { _event }, TimeSpan.FromMilliseconds(timeout));
+                var result = WaitHandle.WaitAny(new WaitHandle[] { _event }, TimeSpan.FromMilliseconds(_lockTimeout));
                 if (result == WaitHandle.WaitTimeout || result == 1)
                 {
                     UnLock();
@@ -80,6 +83,7 @@ namespace ZookeeperLocker
 
             return true;
         }
+
         public void UnLock()
         {
             _client.deleteAsync(_currentNode).Wait();
