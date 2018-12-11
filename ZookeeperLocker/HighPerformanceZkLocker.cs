@@ -20,7 +20,18 @@ namespace ZookeeperLocker
     {
         private static ZkOption _option;
 
-        internal static ZooKeeper Client;
+        private static ZooKeeper Client;
+
+        public static ZooKeeper GetClient()
+        {
+            if (!(Client.getState() == ZooKeeper.States.CONNECTED ||
+                  Client.getState() == ZooKeeper.States.CONNECTEDREADONLY))
+            {
+                Client = CreateClient(_option);
+            }
+
+            return Client;
+        }
 
         private static readonly object _lockObj = new object();
 
@@ -55,11 +66,6 @@ namespace ZookeeperLocker
         /// <returns></returns>
         public static IZkLocker GetLocker(string lockName, int timeout = 5000)
         {
-            if (!(Client.getState() == ZooKeeper.States.CONNECTED ||
-                  Client.getState() == ZooKeeper.States.CONNECTEDREADONLY))
-            {
-                Client = CreateClient(_option);
-            }
             return new Locker(lockName, timeout);
         }
     }
@@ -69,19 +75,20 @@ namespace ZookeeperLocker
         public static readonly ZkWatcher Default = new Lazy<ZkWatcher>(() => new ZkWatcher()).Value;
 
         private ZkWatcher() { }
-
-        internal readonly ISubject<string> Subject = new Lazy<ISubject<string>>(() => new Subject<string>()).Value;
         
-        public override Task process(WatchedEvent @event)
+        public override async Task process(WatchedEvent @event)
         {
             if (@event.get_Type() == Event.EventType.NodeDeleted)
             {
-                var result = ZkLockerManager.Client
-                    .getChildrenAsync(@event.getPath().Substring(0, @event.getPath().LastIndexOf('/'))).Result;
+                var result = await ZkLockerManager.GetClient()
+                    .getChildrenAsync(@event.getPath().Substring(0, @event.getPath().LastIndexOf('/')));
                 var children = result.Children.OrderBy(item => int.Parse(Regex.Replace(item, @"[a-zA-Z|_]", "0"))).ToList();
-                MessageManager<Null>.Publish(children[0], new Null());
+                if (children.Count > 0)
+                {
+                    MessageManager<Null>.Publish(
+                        @event.getPath().Substring(0, @event.getPath().LastIndexOf('/') + 1) + children[0], new Null());
+                }
             }
-            return Task.CompletedTask;
         }
     }
 
@@ -95,7 +102,7 @@ namespace ZookeeperLocker
 
         private readonly IObserver<Null> _observer;
 
-        private void RecieveMessage()
+        private void ReceiveMessage()
         {
             if (!_event.SafeWaitHandle.IsInvalid)
             {
@@ -104,7 +111,7 @@ namespace ZookeeperLocker
         }
         private async Task<bool> ExistPreNodeExecuted()
         {
-            var result = await ZkLockerManager.Client.getChildrenAsync($"/locks/{_lockName}");
+            var result = await ZkLockerManager.GetClient().getChildrenAsync($"/locks/{_lockName}");
             var children = result.Children.OrderBy(item => int.Parse(Regex.Replace(item, @"[a-zA-Z|_]", "0"))).ToList();
             var currentIndex = children.IndexOf(_currentNode.Replace($"/locks/{_lockName}/", ""));
             if (currentIndex <= 0)
@@ -115,30 +122,31 @@ namespace ZookeeperLocker
         }
         public Locker(string lockName, int timeout)
         {
-            if (ZkLockerManager.Client.existsAsync("/locks").Result == null)
+            if (ZkLockerManager.GetClient().existsAsync("/locks").Result == null)
             {
-                ZkLockerManager.Client.createAsync("/locks", new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT).Wait();
+                ZkLockerManager.GetClient().createAsync("/locks", new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT).Wait();
             }
-            if (ZkLockerManager.Client.existsAsync("/locks/" + lockName).Result == null)
+            if (ZkLockerManager.GetClient().existsAsync("/locks/" + lockName).Result == null)
             {
-                ZkLockerManager.Client.createAsync("/locks/" + lockName, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT).Wait();
+                ZkLockerManager.GetClient().createAsync("/locks/" + lockName, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT).Wait();
             }
             _lockName = lockName;
             _lockTimeout = timeout;
 
-            _observer = Observer.Create<Null>(_ => { RecieveMessage(); });
+            _observer = Observer.Create<Null>(_ => { ReceiveMessage(); });
         }
 
         public void Lock()
         {
-            _currentNode = ZkLockerManager.Client.createAsync($"/locks/{_lockName}/node", new byte[0],
+            _currentNode = ZkLockerManager.GetClient().createAsync($"/locks/{_lockName}/node", new byte[0],
                 ZooDefs.Ids.OPEN_ACL_UNSAFE,
                 CreateMode.EPHEMERAL_SEQUENTIAL).Result;
 
-            ZkLockerManager.Client.existsAsync(_currentNode, true);
+            ZkLockerManager.GetClient().existsAsync(_currentNode, true);
            
             if (ExistPreNodeExecuted().Result)
             {
+                MessageManager<Null>.Subscribe(_currentNode, _observer);
                 var result = WaitHandle.WaitAny(new WaitHandle[] { _event }, TimeSpan.FromMilliseconds(_lockTimeout));
                 if (result == WaitHandle.WaitTimeout || result == 1)
                 {
@@ -150,7 +158,8 @@ namespace ZookeeperLocker
 
         public void UnLock()
         {
-            ZkLockerManager.Client.deleteAsync(_currentNode).Wait();
+            ZkLockerManager.GetClient().deleteAsync(_currentNode).Wait();
+            MessageManager<Null>.DeleteSubject(_currentNode);
             _observer.OnCompleted();
             _event.Dispose();
         }

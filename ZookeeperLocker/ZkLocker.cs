@@ -28,6 +28,15 @@ namespace ZookeeperLocker
 
         }
 
+        /// <summary>
+        /// 全局默认锁defaultLock
+        /// </summary>
+        /// <param name="option">配置选项</param>
+        /// <param name="lockTimeout">设置锁超时时间</param>
+        public ZkLocker(ZkOption option,int lockTimeout) : this("defaultLock", option, lockTimeout)
+        {
+
+        }
         public ZkLocker(string lockName, ZkOption option, int lockTimeout = 5000)
         {
             _client = option.SessionId == long.MinValue

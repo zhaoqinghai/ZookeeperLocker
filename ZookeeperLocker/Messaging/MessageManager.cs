@@ -32,11 +32,9 @@ namespace ZookeeperLocker.Messaging
         /// <param name="message"></param>
         public static void Publish(string subject, T message)
         {
-            WeakReference<IObserver<T>> value;
-            if (_cache.TryGetValue(subject, out value))
+            if (_cache.TryGetValue(subject, out var value))
             {
-                IObserver<T> target;
-                if (value.TryGetTarget(out target))
+                if (value.TryGetTarget(out var target))
                 {
                     target.OnNext(message);
                 }
@@ -64,8 +62,7 @@ namespace ZookeeperLocker.Messaging
                 var tempCache = _cache.ToArray();
                 var invalidCache = tempCache.Where(item =>
                 {
-                    IObserver<T> target;
-                    if (!item.Value.TryGetTarget(out target))
+                    if (!item.Value.TryGetTarget(out var target))
                     {
                         return true;
                     }
@@ -74,8 +71,7 @@ namespace ZookeeperLocker.Messaging
                 });
                 foreach (var keyValuePair in invalidCache)
                 {
-                    WeakReference<IObserver<T>> value;
-                    _cache.TryRemove(keyValuePair.Key, out value);
+                    _cache.TryRemove(keyValuePair.Key, out var _);
                 }
             });
         }

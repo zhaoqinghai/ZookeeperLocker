@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -92,10 +93,12 @@ namespace ZookeeperLocker.Test
         [Fact]
         public void TestLockTimeout()
         {
+            Stopwatch sp = Stopwatch.StartNew();
+            sp.Restart();
             Parallel.For(0, 30, _ =>
             {
                 var zkLocker = new ZkLocker(new ZkOption()
-                    { ConnectionsString = "192.168.1.246:2181", SessionTimeout = 30000 });
+                    { ConnectionsString = "192.168.1.246:2181", SessionTimeout = 30000 }, int.MaxValue);
                 try
                 {
                     zkLocker.Lock();
@@ -107,6 +110,8 @@ namespace ZookeeperLocker.Test
                     _testOutputHelper.WriteLine(ex.Message);
                 }
             });
+            sp.Stop();
+            _testOutputHelper.WriteLine($"{sp.ElapsedMilliseconds}");
         }
 
         [Fact]
@@ -121,15 +126,28 @@ namespace ZookeeperLocker.Test
         }
 
         [Fact]
-        public void Test()
+        public void TestHighPerformance()
         {
-            IObserver<string> observer = Observer.Create<string>(_ =>
+            Stopwatch sp = Stopwatch.StartNew();
+            sp.Restart();
+            ZkLockerManager.Configure(new ZkOption()
+                { ConnectionsString = "192.168.1.246:2181", SessionTimeout = 30000 });
+            Parallel.For(0, 30, _ =>
+            {
+                var zkLocker = ZkLockerManager.GetLocker("asd", timeout:int.MaxValue);
+                try
                 {
-                    Console.WriteLine($"{_}111111");
+                    zkLocker.Lock();
+                    _testOutputHelper.WriteLine("1");
+                    zkLocker.UnLock();
                 }
-                );
-            observer.OnNext("asdf");
-            Thread.Sleep(1000);
+                catch (LockerTimeoutException ex)
+                {
+                    _testOutputHelper.WriteLine(ex.Message);
+                }
+            });
+            sp.Stop();
+            _testOutputHelper.WriteLine($"{sp.ElapsedMilliseconds}");
         }
     }
 }
